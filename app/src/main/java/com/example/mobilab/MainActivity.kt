@@ -35,6 +35,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.tooling.preview.Preview
 import com.example.mobilab.data.*
 import com.example.mobilab.ui.theme.*
 import kotlinx.coroutines.launch
@@ -231,7 +232,8 @@ fun RVRJC_LoginGateway(onLoginSuccess: (AuthResponse) -> Unit) {
 // --- SCREEN 1.5: VM LOGIN SCREEN ---
 @Composable
 fun VMLoginScreen(vmIp: String, onConnectionInitiated: () -> Unit, onBack: () -> Unit) {
-    var password by remember { mutableStateOf("") }
+    var redirectCamera by remember { mutableStateOf(false) }
+    var redirectMic by remember { mutableStateOf(false) }
     var isConnecting by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
@@ -260,28 +262,67 @@ fun VMLoginScreen(vmIp: String, onConnectionInitiated: () -> Unit, onBack: () ->
                     fontWeight = FontWeight.Bold
                 )
                 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("VM PASSWORD") },
-                    visualTransformation = PasswordVisualTransformation(),
+                Divider(color = BorderLight, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    "HARDWARE REDIRECTION",
                     modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = RVRJC_Navy,
-                        unfocusedBorderColor = BorderLight
-                    ),
-                    singleLine = true
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextMuted,
+                    fontWeight = FontWeight.Bold
                 )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Redirect Camera", style = MaterialTheme.typography.bodyMedium, color = TextDark)
+                    Switch(
+                        checked = redirectCamera,
+                        onCheckedChange = { redirectCamera = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = RVRJC_Navy, checkedTrackColor = RVRJC_Navy.copy(alpha = 0.5f))
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Redirect Microphone", style = MaterialTheme.typography.bodyMedium, color = TextDark)
+                    Switch(
+                        checked = redirectMic,
+                        onCheckedChange = { redirectMic = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = RVRJC_Navy, checkedTrackColor = RVRJC_Navy.copy(alpha = 0.5f))
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
                     onClick = {
                         isConnecting = true
-                        val rdpUriString = "rdp://full%20address=s:$vmIp&username=s:user1&password=s:$password"
+                        
+                        // Construct RDP URI based on documentation: https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-uri
+                        val rdpUriBuilder = StringBuilder("rdp://full%20address=s:$vmIp&username=s:user1")
+                        
+                        if (redirectMic) {
+                            rdpUriBuilder.append("&audiocapturemode:i:1")
+                        }
+                        if (redirectCamera) {
+                            rdpUriBuilder.append("&camerastoredirect:s:*")
+                        }
+                        
+                        val rdpUriString = rdpUriBuilder.toString()
                         val rdpIntent = Intent(Intent.ACTION_VIEW, Uri.parse(rdpUriString))
+                        
+                        // Use the modern package ID
+                        val rdpPackageId = "com.microsoft.rdc.androidx"
+                        rdpIntent.setPackage(rdpPackageId)
                         
                         val packageManager = context.packageManager
                         val activities = packageManager.queryIntentActivities(rdpIntent, 0)
@@ -293,10 +334,10 @@ fun VMLoginScreen(vmIp: String, onConnectionInitiated: () -> Unit, onBack: () ->
                         } else {
                             Toast.makeText(context, "Microsoft Remote Desktop not found. Redirecting to Play Store...", Toast.LENGTH_LONG).show()
                             try {
-                                val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.microsoft.rdc.android"))
+                                val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$rdpPackageId"))
                                 context.startActivity(playStoreIntent)
                             } catch (e: Exception) {
-                                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.microsoft.rdc.android"))
+                                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$rdpPackageId"))
                                 context.startActivity(webIntent)
                             }
                             isConnecting = false
@@ -496,14 +537,16 @@ fun MobileRemoteView(session: SessionResponse, onExit: () -> Unit) {
     }
 }
 
-// --- SCREEN 4: PI TOKEN DEPLOYMENT CENTER ---
+// --- SCREEN 4: PI TOKEN DEPLOYMENT CENTER (QR SCANNER) ---
 @Composable
 fun PiTokenDeploymentCenter(session: SessionResponse, onBack: () -> Unit) {
-    val infiniteTransition = rememberInfiniteTransition(label = "broadcast")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse),
-        label = "alpha"
+    var isScanned by remember { mutableStateOf(false) }
+    val infiniteTransition = rememberInfiniteTransition(label = "scanner")
+    val scanLineOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 200.dp.value,
+        animationSpec = infiniteRepeatable(animation = tween(2000, easing = LinearEasing), repeatMode = RepeatMode.Restart),
+        label = "scanLine"
     )
 
     Column(
@@ -511,48 +554,127 @@ fun PiTokenDeploymentCenter(session: SessionResponse, onBack: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Card(
-            modifier = Modifier.size(280.dp),
-            colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-            border = BorderStroke(2.dp, RVRJC_Maroon)
-        ) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+        if (!isScanned) {
+            Text(
+                "SCAN PI QR CODE",
+                style = MaterialTheme.typography.headlineSmall,
+                color = RVRJC_Navy,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Align the QR code on the monitor within the frame",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextMuted,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            Box(
+                modifier = Modifier
+                    .size(280.dp)
+                    .background(Color.Black, RoundedCornerShape(12.dp))
+                    .border(BorderStroke(2.dp, Color.White.copy(alpha = 0.3f)), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                // Scanning Frame
                 Canvas(modifier = Modifier.size(200.dp)) {
-                    drawRect(RVRJC_Maroon, style = Stroke(width = 2.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(20f, 10f))))
+                    val strokeWidth = 4.dp.toPx()
+                    val cornerLength = 40.dp.toPx()
+                    
+                    // Top Left
+                    drawLine(Color.White, Offset(0f, 0f), Offset(cornerLength, 0f), strokeWidth)
+                    drawLine(Color.White, Offset(0f, 0f), Offset(0f, cornerLength), strokeWidth)
+                    
+                    // Top Right
+                    drawLine(Color.White, Offset(size.width, 0f), Offset(size.width - cornerLength, 0f), strokeWidth)
+                    drawLine(Color.White, Offset(size.width, 0f), Offset(size.width, cornerLength), strokeWidth)
+                    
+                    // Bottom Left
+                    drawLine(Color.White, Offset(0f, size.height), Offset(cornerLength, size.height), strokeWidth)
+                    drawLine(Color.White, Offset(0f, size.height), Offset(0f, size.height - cornerLength), strokeWidth)
+                    
+                    // Bottom Right
+                    drawLine(Color.White, Offset(size.width, size.height), Offset(size.width - cornerLength, size.height), strokeWidth)
+                    drawLine(Color.White, Offset(size.width, size.height), Offset(size.width, size.height - cornerLength), strokeWidth)
+
+                    // Animated Scan Line
+                    drawLine(
+                        color = SuccessGreen,
+                        start = Offset(0f, scanLineOffset * density),
+                        end = Offset(size.width, scanLineOffset * density),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
                 }
-                Icon(Icons.Default.QrCodeScanner, null, tint = RVRJC_Maroon, modifier = Modifier.size(80.dp))
+                
+                Icon(
+                    Icons.Default.QrCodeScanner,
+                    null,
+                    tint = Color.White.copy(alpha = 0.2f),
+                    modifier = Modifier.size(100.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            Button(
+                onClick = { isScanned = true },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = RVRJC_Navy),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Icon(Icons.Default.CameraAlt, null)
+                Spacer(modifier = Modifier.width(12.dp))
+                Text("MOCK SCAN QR CODE", fontWeight = FontWeight.Bold)
+            }
+        } else {
+            // Success State
+            Icon(
+                Icons.Default.CheckCircle,
+                null,
+                tint = SuccessGreen,
+                modifier = Modifier.size(100.dp)
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                "SESSION HANDOFF SUCCESSFUL",
+                style = MaterialTheme.typography.titleLarge,
+                color = TextDark,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                "Your VM session is now active on the classroom monitor. You can now use the physical keyboard and mouse.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            
+            Spacer(modifier = Modifier.height(48.dp))
+            
+            Surface(
+                color = RVRJC_Gold.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, RVRJC_Gold)
+            ) {
+                Text(
+                    "ACTIVE TOKEN: ${session.token.take(8).uppercase()}",
+                    modifier = Modifier.padding(16.dp),
+                    color = TextDark,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
-        Text(
-            "STREAMING HANDOFF CREDENTIALS\nTO CAMPUS NETWORK WORKSTATION...",
-            color = RVRJC_Maroon.copy(alpha = alpha),
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.titleMedium,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Surface(color = RVRJC_Gold.copy(alpha = 0.1f), shape = RoundedCornerShape(4.dp)) {
-            Text(
-                "SECURE TOKEN: ${session.token.take(8).uppercase()}",
-                modifier = Modifier.padding(8.dp),
-                color = TextDark,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        
         Spacer(modifier = Modifier.height(64.dp))
-        Button(
-            onClick = onBack,
-            colors = ButtonDefaults.buttonColors(containerColor = RVRJC_Maroon),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
-            Spacer(modifier = Modifier.width(12.dp))
-            Text("CANCEL DEPLOYMENT")
+        
+        TextButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("RETURN TO DASHBOARD", color = RVRJC_Maroon)
         }
     }
 }
@@ -636,5 +758,24 @@ fun AdminStatRow(label: String, value: String, color: Color) {
             Text(label, style = MaterialTheme.typography.labelSmall, color = TextMuted)
             Text(value, style = MaterialTheme.typography.titleSmall, color = color, fontWeight = FontWeight.Bold)
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun VMLoginScreenPreview() {
+    MobiLabTheme {
+        VMLoginScreen(vmIp = "135.119.92.61", onConnectionInitiated = {}, onBack = {})
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PiScannerPreview() {
+    MobiLabTheme {
+        PiTokenDeploymentCenter(
+            session = SessionResponse("SESS123", "135.119.92.61", "TOKEN_ABC_123", "rdp", "active"),
+            onBack = {}
+        )
     }
 }
