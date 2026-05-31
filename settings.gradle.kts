@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MobiLab"
+rootProject.name = "Mobidesk"
 include(":app")
