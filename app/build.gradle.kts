@@ -57,8 +57,9 @@ dependencies {
     implementation(platform(libs.supabase.bom))
     implementation(libs.supabase.postgrest)
     implementation(libs.supabase.auth)
+    implementation(libs.supabase.compose.auth)
     implementation(libs.ktor.client)
-    implementation(libs.multiplatform.settings)
+    implementation("com.russhwolf:multiplatform-settings:1.1.1")
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
